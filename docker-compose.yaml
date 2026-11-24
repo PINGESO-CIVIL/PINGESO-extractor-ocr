@@ -1,0 +1,48 @@
+name: extractor-ocr
+
+services:
+  extractor-ocr-db:
+    image: postgres:17-alpine
+    container_name: extractor_ocr_db
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=extractor_ocr
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d extractor_ocr"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  extractor-ocr-backend:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: extractor_ocr_api
+    ports:
+      - "127.0.0.1:5151:8080"
+    environment:
+      - API_PORT=8080
+      - API_ENV=dev
+      - DATABASE_URL=postgres://postgres:postgres@extractor-ocr-db:5432/extractor_ocr?sslmode=disable
+      - FRONTEND_URL=http://localhost:5150
+    depends_on:
+      extractor-ocr-db:
+        condition: service_healthy
+
+  extractor-ocr-frontend:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    container_name: extractor_ocr_web
+    ports:
+      - "127.0.0.1:5150:8080"
+    depends_on:
+      - extractor-ocr-backend
+
+volumes:
+  postgres_data:

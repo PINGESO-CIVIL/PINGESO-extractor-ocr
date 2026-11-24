@@ -1,0 +1,15 @@
+pre-commit:
+  parallel: true
+  commands:
+    go-fmt:
+      glob: "*.go"
+      run: cd apps/api && gofmt -w . && go vet ./...
+      stage_fixed: true
+    secretos:
+      run: gitleaks protect --staged --redact --no-banner
+
+pre-push:
+  parallel: true
+  commands:
+    test-api:
+      run: cd apps/api && go test ./...

@@ -1,0 +1,272 @@
+openapi: 3.1.0
+info:
+  title: API Extractor OCR
+  description: Microservicio del Paquete de Trabajo 5 (Grupo 5) para la extracción óptica de caracteres (OCR) a partir de imágenes digitalizadas, con persistencia en PostgreSQL e integración con Bóveda Documental (PT7).
+  version: 1.0.0
+  contact:
+    name: Grupo 5 - PINGESO DAS
+
+servers:
+  - url: http://localhost:5151
+    description: Entorno de Desarrollo Local
+
+tags:
+  - name: Extracciones
+    description: Procesamiento OCR y consulta de resultados estructurados
+  - name: Salud
+    description: Verificaciones de liveness y readiness (Estándar DAS)
+
+paths:
+  /healthz:
+    get:
+      tags:
+        - Salud
+      summary: Liveness check
+      description: Retorna 200 si el proceso del servicio se encuentra vivo y aceptando solicitudes.
+      responses:
+        '200':
+          description: Servicio vivo
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "ok"
+
+  /readyz:
+    get:
+      tags:
+        - Salud
+      summary: Readiness check
+      description: Retorna 200 si la base de datos PostgreSQL está conectada y lista para operar.
+      responses:
+        '200':
+          description: Base de datos lista
+          content:
+            text/plain:
+              schema:
+                type: string
+                example: "ready"
+        '503':
+          description: Base de datos no disponible
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+
+  /api/v1/extracciones:
+    get:
+      tags:
+        - Extracciones
+      summary: Lista el historial de extracciones OCR
+      description: Retorna un listado de extracciones procesadas. Permite filtrar por estado.
+      parameters:
+        - name: estado
+          in: query
+          description: Filtra por estado de procesamiento
+          required: false
+          schema:
+            type: string
+            enum: [procesando, completado, fallido]
+      responses:
+        '200':
+          description: Lista de extracciones obtenida exitosamente
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ExtraccionResponse'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    post:
+      tags:
+        - Extracciones
+      summary: Solicita una extracción OCR a partir de una imagen
+      description: Recibe un archivo de imagen digitalizada o referencia para procesar y retornar el texto extraído en formato JSON.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - imagen
+              properties:
+                imagen:
+                  type: string
+                  format: binary
+                  description: Archivo de imagen (PNG, JPEG, TIFF, WEBP, máx 10 MB)
+                documento_id:
+                  type: string
+                  format: uuid
+                  description: Identificador UUID opcional del documento en Bóveda Documental (PT7)
+      responses:
+        '201':
+          description: Extracción realizada exitosamente
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtraccionResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '415':
+          $ref: '#/components/responses/UnsupportedMediaType'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /api/v1/extracciones/{id}:
+    get:
+      tags:
+        - Extracciones
+      summary: Obtiene el resultado de una extracción OCR por ID
+      parameters:
+        - $ref: '#/components/parameters/ExtraccionId'
+      responses:
+        '200':
+          description: Detalle de la extracción encontrado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExtraccionResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  parameters:
+    ExtraccionId:
+      name: id
+      in: path
+      required: true
+      description: Identificador UUID de la extracción
+      schema:
+        type: string
+        format: uuid
+        example: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+
+  schemas:
+    ExtraccionResponse:
+      type: object
+      required:
+        - id
+        - estado
+        - texto_extraido
+        - fecha_creacion
+      properties:
+        id:
+          type: string
+          format: uuid
+          example: "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d"
+        documento_id:
+          type: string
+          format: uuid
+          nullable: true
+          example: "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+        nombre_archivo:
+          type: string
+          example: "imagen_ejemplo.png"
+        estado:
+          type: string
+          enum: [procesando, completado, fallido]
+          example: "completado"
+        texto_extraido:
+          type: string
+          description: Texto consolidado obtenido por el motor OCR
+          example: "Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua."
+        confianza_promedio:
+          type: number
+          format: float
+          description: Porcentaje promedio de certeza (0.0 a 1.0)
+          example: 0.95
+        bloques:
+          type: array
+          description: Bloques o fragmentos de texto detectados
+          items:
+            $ref: '#/components/schemas/BloqueTexto'
+        fecha_creacion:
+          type: string
+          format: date-time
+          example: "2026-11-23T19:00:00Z"
+
+    BloqueTexto:
+      type: object
+      properties:
+        linea:
+          type: integer
+          example: 1
+        texto:
+          type: string
+          example: "Lorem ipsum dolor sit amet"
+        confianza:
+          type: number
+          format: float
+          example: 0.98
+
+    ProblemDetails:
+      type: object
+      required:
+        - type
+        - title
+        - status
+      properties:
+        type:
+          type: string
+          format: uri
+          example: "https://httpstatuses.io/400"
+        title:
+          type: string
+          example: "Solicitud inválida"
+        status:
+          type: integer
+          example: 400
+        detail:
+          type: string
+          example: "El archivo enviado no posee un formato de imagen compatible."
+        instance:
+          type: string
+          format: uri
+          example: "/api/v1/extracciones"
+
+  responses:
+    BadRequest:
+      description: Solicitud mal formada o parámetros incorrectos (RFC 9457)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    NotFound:
+      description: Recurso no encontrado (RFC 9457)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    UnsupportedMediaType:
+      description: Formato de archivo de imagen no soportado (RFC 9457)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    PayloadTooLarge:
+      description: El archivo de imagen supera el límite permitido (máx 10 MB)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    UnprocessableEntity:
+      description: Imagen corrupta o ilegible para el motor OCR
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    InternalServerError:
+      description: Error interno del servidor o de base de datos (RFC 9457)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
